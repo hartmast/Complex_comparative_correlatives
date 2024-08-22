@@ -1,0 +1,598 @@
+---
+title: "German Comparative Correlatives"
+author: "Stefan Hartmann"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Comparative correlatives
+
+This script contains analyses on the comparative correlative construction in the DTAbaby corpus.
+
+
+### load packages, read data
+
+```{r cars}
+
+
+# install non-CRAN packages (if not yet installed)
+
+# install package wizard, if needed
+if(!is.element("wizard", installed.packages())) {
+    devtools::install_github("hartmast/wizard")
+}
+
+# install package collostructions, if needed
+if(!is.element("collostructions", installed.packages())) {
+  
+  if(.Platform$OS.type=="windows") {
+    if(R.version$major < 4) {
+      install.packages("https://sfla.ch/wp-content/uploads/2018/03/collostructions_0.1.0.zip", repos = NULL)
+    } else {
+      install.packages("https://sfla.ch/wp-content/uploads/2021/02/collostructions_0.2.0.zip", repos = NULL)
+    }
+    
+    
+  } else {
+    if(R.version$major < 4) {
+      install.packages("https://sfla.ch/wp-content/uploads/2018/03/collostructions_0.1.0.zip", repos = NULL)
+    } else {
+      install.packages("https://sfla.ch/wp-content/uploads/2021/02/collostructions_0.2.0.zip", repos = NULL)
+    }
+    
+  }
+  
+  
+}
+
+
+# load packages
+library(tidyverse)
+library(readxl)
+library(ggbeeswarm)
+library(maps)
+library(ggmap)
+library(wizard)
+library(ngram)
+library(collostructions) # available at sfla.ch
+library(writexl)
+library(ca)
+library(FactoMineR)
+library(explor)
+library(factoextra)
+library(tidytext)
+library(patchwork)
+library(lme4)
+library(effects)
+library(ggstats)
+library(scales)
+
+# read data ---------------------------------------------------------------
+
+# CSV sheet
+d <- read_csv("kk_dtababy.csv")
+
+# remove false hits
+d <- filter(d, keep == "y")
+
+
+# metadata of DTAbaby corpus
+dtababy <- read_delim("dtababy_textnames.txt", delim = "\t", quote = "",
+                      col_names = c("size", "file_id", "title", "text_type", "author", "year"))
+dta     <- read_delim("dta2018_textsizes.txt", delim = "\t", quote = "",
+                      col_names = c("freq", "file_id"))
+
+dtababy <- left_join(dtababy, dta)
+
+# add century
+dtababy$century <- gsub("(?<=..)..", "00", dtababy$year, perl = T)
+
+```
+
+### Matadata DTAbaby
+
+```{r}
+
+# plot metadata -----------------------------------------------------------
+
+# English names for text types
+dtababy <- dtababy %>% mutate(text_type = case_when(dtababy$text_type == "Wissenschaft" ~ "Science",
+                                         dtababy$text_type == "Gebrauchsliteratur" ~ "Functional Literature",
+                                         dtababy$text_type == "Belletristik" ~ "Fiction"))
+
+ggplot(dtababy, aes(x = year, y = text_type, size = freq, col = author)) +
+  geom_quasirandom() + 
+  guides(col = "none", size = "none") +
+  # geom_boxplot(aes(group = text_type), notch = T, alpha = .5) +
+  scale_color_viridis_d() +
+  theme_bw() + ylab("Textsorte") + xlab("Jahr") +
+  theme(axis.text = element_text(size = 18)) +
+  theme(axis.title = element_text(size = 18)) +
+  theme(strip.text = element_text(size = 18)) +
+  theme(legend.text = element_text(size = 18)) +
+  theme(legend.title = element_text(size = 18, face = "bold")) +
+  theme(text = element_text(size = 18)) +
+  ggtitle("Text distribution in DTAbaby") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+# ggsave("dtababy_distribution_EN.png", width = 9, height = 6.5)
+# ggsave("dtababy_distribution_with_boxplot_EN.png", width = 9, height = 6.5)
+
+
+```
+
+### Frequency of CCs per text
+
+```{r}
+
+
+# Number of CCs per text --------------------------------------------------
+
+# absolute number of CCs per text
+d_tbl <- d %>% group_by(file_id) %>% summarise(
+  CCs = n()
+)
+
+# combine files
+dtababy <- left_join(dtababy, d_tbl)
+
+# relative frequency of CCs per text
+dtababy$rel <- dtababy$CCs / dtababy$freq
+dtababy <- dtababy %>% replace_na(list(rel = 0))
+dtababy$zero <- factor(ifelse(dtababy$rel==0, 0, 1))
+
+# plot
+
+dtababy %>% mutate(
+  authorlabel = ifelse(dtababy$rel*100000 > 15, gsub(".* ", "", dtababy$author), "")
+) %>% ggplot(aes(x = year, y = rel*100000)) + 
+  geom_point(aes(col = zero)) + geom_smooth() +
+  geom_text(aes(label = authorlabel), vjust = -0.8, cex = 2.5) +
+  facet_wrap(~text_type) +
+  ylab("CCs per 100,000 words") + xlab("Year") +
+  theme_bw() +
+  scale_color_manual(values = c("grey", "black")) +
+  guides(color = "none")
+# ggsave("kks_rel_freq_annotated01_EN.png", width = 12, height = 5.5)  
+
+
+```
+
+### Overview table
+
+```{r}
+
+# English names for text types
+
+d$file_genre <- case_when(d$file_genre == "Belletristik" ~ "Fiction",
+          d$file_genre == "Gebrauchsliteratur" ~ "Functional literature",
+          d$file_genre == "Wissenschaft" ~ "Science")
+
+
+# distribution of data across time and text types -------------------------
+
+d %>% select(file_century, file_genre) %>% table
+
+
+```
+
+### Quantitative Auswertungen
+
+```{r}
+
+# order of protasis and apodosis ------------------------------------------
+
+# refactor
+d$structure <- ifelse(d$Structure %in% c("P_A", "A_P", "P_P_A", "P_A_A", "A_P_P", "A_A_P", "P_P_P_A", "P_A_A_A", "P_P_A_A", "A_P_P_P", "A_A_P_P", "A_A_A_P"), 
+                      d$Structure,
+                      ">4 clauses")
+d$structure <- factor(d$structure, levels = c("P_A", "A_P", "P_P_A", "P_A_A", "A_P_P", "A_A_P", "P_P_P_A", "P_A_A_A", "P_P_A_A", "A_P_P_P", "A_A_P_P", "A_A_A_P", ">4 clauses") )
+
+
+
+qbarplot(d, file_century, structure, file_genre, wrap100=T) + 
+  scale_fill_manual(values = c("yellow", "gold1", "cyan1", "cyan3", "lightblue3", 
+                               "dodgerblue", "palegreen", "seagreen2", "springgreen2", "seagreen3", 
+                               "springgreen4", "olivedrab", "purple")) +
+  xlab("Century") + ylab("Relative Frequency") +
+  guides(fill = guide_legend(title = "Structure"))
+
+# ggsave("structure_EN.png", width = 10, height = 6)
+
+
+
+# clause order and sentence type ------------------------------------------
+
+cosenty <- function(i) {
+  p <- d %>% mutate(Reihenfolge = ifelse(grepl("^A", d$structure), "Apodosis > Protasis", "Protasis > Apodosis")) %>%
+    mutate(KK_Nebensatz = ifelse(KK_im_Nebensatz=="y", "CC in subord. clause", "CC in main clause")) %>%
+    mutate(KK_Nebensatz = factor(KK_Nebensatz, levels=c("CC in main clause", "CC in subord. clause"))) %>%
+    filter(file_genre == levels(factor(d$file_genre))[i]) %>%
+    qbarplot(file_century, Reihenfolge, KK_Nebensatz, wrap100=T) + xlab("Century") + ylab("Relative Frequency") +
+    ggtitle(levels(factor(d$file_genre))[i]) +
+    theme(plot.title = element_text(face = "bold", hjust = 0.5))
+  return(p)
+}
+
+cosenty(1) / cosenty(2) / cosenty(3) + plot_layout(guides = "collect")
+# ggsave("Order_main_subordinate_EN_portrait.png", width = 10, height= 15  )
+
+
+
+
+
+# get connectors ----------------------------------------------------------
+
+
+# find out if all items in a comma-separated list match the same string
+# (so that "desto,desto" can be simplified to "desto" etc.)
+
+# function for doing that:
+find_match <- Vectorize(function(x, str) {
+  y <- all(trimws(unlist(strsplit(x, ","))) %in% str)
+  return(y)
+}, vectorize.args = "x", USE.NAMES = FALSE)
+
+# add column with simplified connectors:
+d$Konnektor1 <- case_when(find_match(d$Konnektor_Protasis, c("je", "je nachdem")) ~ "je",
+          find_match(d$Konnektor_Protasis, c("umso", "um so")) ~ "umso",
+          find_match(d$Konnektor_Protasis, "desto") ~ "desto",
+          .default = "Other")
+
+d$Konnektor2 <- case_when(find_match(d$Konnektor_Apodosis, c("umso", "um so")) ~ "umso",
+          find_match(d$Konnektor_Apodosis, c("desto", "detso")) ~ "desto",
+          find_match(d$Konnektor_Apodosis, c("umso", "um so")) ~ "umso",
+          find_match(d$Konnektor_Apodosis, "je") ~ "je",
+          .default = "Other")
+
+
+# combine Konnektor1 and Konnektor2
+d$Konnektor <- paste0(d$Konnektor1, "-", d$Konnektor2)
+
+d$Konnektor <- factor(d$Konnektor, levels = c("je-je", "je-umso", "je-desto", "je-Other",
+                              "desto-desto", "desto-Other", "umso-Other",
+                              "Other-desto", "Other-umso", "Other-Other"))
+
+qbarplot(d, file_century, Konnektor, file_genre, wrap100 = T) +
+  scale_fill_manual(values = c("yellow",  "gold", "goldenrod1", "goldenrod3",
+                                "palegreen", "palegreen4", 
+                                "lightskyblue", "lightskyblue3",
+                                "grey75", "grey50", "grey25")) +
+  ylab("Relative Frequency") + xlab("Century") +
+  guides(fill = guide_legend(title = "Connector"))
+
+# ggsave("connectors_EN.png", width = 10, height = 5.5)
+
+
+
+# order of protasis and apodosis, conditional on whether or not
+# there are different connectors
+
+d$same_connector <- ifelse(d$Konnektor %in% c("je-je", "desto-desto"), "=", "≠")
+
+for(i in c(1:3)) {
+  assign(paste0("p", i), qbarplot(filter(d, file_genre == levels(factor(d$file_genre))[i]), 
+                  file_century, structure, same_connector, wrap100=T) +
+           scale_fill_manual(values = c("yellow", "gold1", "cyan1", "cyan3", "lightblue3", 
+                                        "dodgerblue", "palegreen", "seagreen2", "springgreen2", "seagreen3", 
+                                        "springgreen4", "olivedrab", "purple")) +
+           xlab("Century") + ylab("Relative Frequency") +
+           guides(fill = guide_legend(title = "Structure")) +
+           ggtitle(levels(factor(d$file_genre))[i]) +
+           theme(plot.title = element_text(face = "bold", hjust = 0.5)))
+}
+
+
+p1 / p2 / p3 + plot_layout(guides = "collect")
+# ggsave("structure_by_connectors_EN_portrait.png", width = 7, height = 13)
+
+
+
+
+# Verb position -----------------------------------------------------------
+
+d$Verbstellung <- NA
+d$Verbstellung <- case_when(grepl(",", d$Verbstellung_Protasis) & grepl(",", d$Verbstellung_Apodosis) ~ "multiple in P & A",
+          grepl(",", d$Verbstellung_Protasis) & !grepl(",", d$Verbstellung_Apodosis) ~ "multiple in P",
+          !grepl(",", d$Verbstellung_Protasis) & grepl(",", d$Verbstellung_Apodosis) ~ "multiple in A",
+          .default = paste0(d$Verbstellung_Protasis, "-", d$Verbstellung_Apodosis))
+
+
+# remove NAs (= items in which verb position in protasis and apodosis
+# can't be assessed because protasis and apodosis jointly modify some element)
+d[grepl("NA", d$Verbstellung),]$Verbstellung <- NA
+
+
+
+# distinguish between main and subordinate clause for Vl-VL
+d$Verbstellung <- ifelse(d$Verbstellung=="VL-VL" & d$KK_im_Nebensatz=="y", "VL-VL(n)", d$Verbstellung)
+
+
+# refactor
+d$Verbstellung <- factor(d$Verbstellung, levels = c("VL-V2", "VL-VL", "VL-VL(n)", "VL-V0", "VL-V1", 
+                                  "V0-V2", "V0-VL", "V0-V0",
+                                  "V2-V2", "V2-VL", "V2-V0",
+                                  "multiple in A", "multiple in P"))
+
+
+
+d %>% select(file_century, file_genre, Verbstellung) %>% na.omit %>%
+  qbarplot(file_century, Verbstellung, file_genre, wrap100 = T) +
+  scale_fill_manual(values = c("yellow", "goldenrod1", "darkgoldenrod3", "darkorange", "chocolate",
+                               "palegreen", "palegreen4", "darkgreen", 
+                               "lightskyblue", "lightskyblue3", "lightskyblue4",
+                               "grey75", "grey50")) +
+  # guides(fill=guide_legend(ncol=2)) +
+  xlab("Century") + ylab("Relative Frequency") +
+  guides(fill = guide_legend(title = "Verb position"))
+
+# ggsave("Verb_position_EN.png", width = 10, height = 6)
+
+
+# verb position and same vs. different connectors
+for(i in 1:3) {
+  assign(paste0("p0",i), 
+         qbarplot(filter(d, file_genre == levels(factor(d$file_genre))[i]), file_century, 
+                  Verbstellung, same_connector, wrap100 = T) +
+           scale_fill_manual(values = c("yellow", "goldenrod1", "darkgoldenrod3", "darkorange", "chocolate",
+                                        "palegreen", "palegreen4", "darkgreen", 
+                                        "lightskyblue", "lightskyblue3", "lightskyblue4",
+                                        "grey75", "grey50")) +
+           # guides(fill=guide_legend(ncol=2)) +
+           xlab("Century") + ylab("Relative Frequency") +
+           ggtitle(levels(factor(d$file_genre))[i]) +
+           guides(fill = guide_legend(title = "Verb position")) +
+           theme(plot.title = element_text(face = "bold", hjust = 0.5)))
+}
+
+
+p01 / p02 / p03 + plot_layout(guides = "collect")
+ ggsave("verbstellung_same_different_connectors_EN_portrait.png", width = 7, height = 13)
+
+```
+
+### Correspondence Analysis
+
+```{r}
+
+# correspondence analysis -------------------------------------------------
+
+# get subset with relevant variables
+
+# Century
+d$Century <- factor(d$file_century)
+
+# Clause order (DE and EN)
+d$Reihenfolge <- ifelse(grepl("^A", d$Structure), "Apodosis>Protasis", "Protasis>Apodosis")
+d$Reihenfolge <- factor(d$Reihenfolge, levels = c("Protasis>Apodosis", "Apodosis>Protasis"))
+
+# EN
+d$Clause_Order <- d$Reihenfolge
+
+# Number of clauses (DE and EN)
+d$Anzahl_Teilsätze <- sapply(1:nrow(d), function(i) ifelse(length(unlist(strsplit(d$Structure[i], "_")))>2, ">2 Teilsätze", "2 Teilsätze"))
+d$Anzahl_Teilsätze <- factor(d$Anzahl_Teilsätze, levels = c("2 Teilsätze", ">2 Teilsätze"))
+
+# EN
+d$Number_of_Clauses <- sapply(1:nrow(d), function(i) ifelse(length(unlist(strsplit(d$Structure[i], "_")))>2, ">2 clauses", "2 clauses"))
+d$Number_of_Clauses <- factor(d$Number_of_Clauses, levels = c("2 clauses", ">2 clauses"))
+
+# Phrase types
+d$Phrasentypen <- sapply(1:nrow(d), function(i) ifelse(any(unlist(strsplit(d$Komparativphrase_Protasis[i], ","))!="AdjP" | any(unlist(strsplit(d$Komparativphrase_Apodosis[i], ","))!="AdjP")), "Andere", "AdjP"))
+d$Phrasentypen <- factor(d$Phrasentypen, levels = c("AdjP", "Andere"))
+
+# EN
+d$Phrase_Types <- sapply(1:nrow(d), function(i) ifelse(any(unlist(strsplit(d$Komparativphrase_Protasis[i], ","))!="AdjP" | any(unlist(strsplit(d$Komparativphrase_Apodosis[i], ","))!="AdjP")), "Andere", "AdjP"))
+d$Phrase_Types <- factor(d$Phrase_Types, levels = c("AdjP", "Andere"))
+
+
+# Joint referent
+d$Gemeinsamer_Bezug <- ifelse(d$gemeinsamer_Bezug=="nein", "kein gem. Bezug", "gem. Bezug")
+d$Gemeinsamer_Bezug <- factor(d$Gemeinsamer_Bezug, levels = c("kein gem. Bezug", "gem. Bezug"))
+
+# EN
+d$Joint_Referent <- ifelse(d$gemeinsamer_Bezug=="nein", "Joint referent", "No joint referent")
+d$Joint_Referent <- factor(d$Joint_Referent, levels = c("Joint referent", "No joint referent"))
+
+# Sentence Type
+d$Satztyp <- ifelse(d$KK_im_Nebensatz=="y" | is.na(d$KK_im_Nebensatz), "KK im Hauptsatz", "KK im Nebensatz")
+d$Satztyp <- factor(d$Satztyp)
+
+# EN
+d$Sentence_Type <- ifelse(d$KK_im_Nebensatz=="y" | is.na(d$KK_im_Nebensatz), "CC in main clause", "CC in subordinate clause")
+d$Sentence_Type <- factor(d$Sentence_Type)
+
+# English names
+d$Connector <- d$Konnektor
+d$Verb_position <- d$Verbstellung
+
+mca_input <- select(d, file_genre, Century, Connector, Clause_Order, 
+                    Joint_Referent, Sentence_Type, Verb_position,
+                    Phrase_Types, Number_of_Clauses)
+mca_results <- MCA(na.omit(mca_input), quali.sup = c(1,2), graph = FALSE)
+res <- explor::prepare_results(mca_results)
+explor::MCA_var_plot(res, xax = 1, yax = 2, var_sup = TRUE, var_sup_choice = c("file_genre",
+                                                                               "Century"), var_lab_min_contrib = 0, col_var = "Variable", symbol_var = "Type",
+                     size_var = NULL, size_range = c(10, 300), labels_size = 10, point_size = 56,
+                     transitions = TRUE, labels_positions = NULL, labels_prepend_var = FALSE,
+                     xlim = c(-4.61, 5.2), ylim = c(-5.28, 4.53))
+
+
+#explor(mca_results)
+# dimdesc(mca_results)
+#fviz_mca_var(mca_results, choice = "var.cat", col.quali.sup = "red",
+ #            col.var = "black")
+# ggsave("mca02.png", height = 20, width = 20, bg = "white")
+
+
+
+
+```
+
+
+### Salience index
+
+```{r}
+
+# salience index
+d$salience <- 0
+
+# add 1 for >2 clauses
+d$salience <- ifelse(d$Anzahl_Teilsätze == ">2 Teilsätze",d$salience+1, d$salience)
+
+# add 1 for preposed apodosis
+d$salience <- ifelse(d$Reihenfolge == "Apodosis>Protasis", d$salience+1, d$salience)
+
+# add 1 for phrase types other than AdjP
+d$salience <- ifelse(d$Phrasentypen=="Andere", d$salience+1, d$salience)
+
+
+# get mean salience
+se <- function(x) sqrt(var(x) / length(x))
+
+d_salience <- d %>% group_by(file_id) %>% summarise(
+  mean_salience = mean(salience),
+  sd_salience = sd(salience),
+  se_salience = se(salience)
+)
+
+
+d_salience <- left_join(d_salience, dtababy)
+
+
+
+get_salience_by_author <- function(i,j) {
+  d_salience %>%
+  filter(!author %in% c("unknown", "NA N. N.")) %>%
+  group_by(author) %>%
+  mutate(mean_salience = mean(mean_salience)) %>%
+  ungroup %>%
+  mutate(text_type = factor(text_type),
+         author = factor(author),
+         century = factor(century)) %>%
+  filter(text_type == levels(factor(d_salience$text_type))[i]) %>%
+  filter(century == levels(factor(d_salience$century))[j]) %>%
+  ggplot(aes(x = mean_salience, 
+            y = fct_reorder(author, mean_salience))) +
+  facet_wrap(~century) +
+  geom_point(aes(col = mean_salience), fill = "transparent") +
+  # scale_x_reordered() +
+    scale_color_viridis_b(begin = 0.8, end = 0.3) +
+  ylab("Author") + xlab("Salience index") +
+    ggtitle(levels(factor(d_salience$text_type))[i]) +
+    theme(plot.title = element_text(face = "bold", hjust = 0.5)) +
+    theme(    panel.background = element_rect(fill='transparent'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA)) +
+    guides(col = "none") +
+    xlim(0,2)
+    
+}
+  
+get_salience_by_author(1,1) + get_salience_by_author(1,2) + get_salience_by_author(1,3) +
+  get_salience_by_author(2,1) + get_salience_by_author(2,2) + get_salience_by_author(2,3) +
+  get_salience_by_author(3,1) + get_salience_by_author(3,2) + get_salience_by_author(3,3) +
+  plot_layout(ncol = 3) &
+  theme(    panel.background = element_rect(fill='transparent'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA))
+# ggsave("authors_salience_en_transp.png", width = 15, height = 10, bg = "transparent")
+
+```
+
+## Additional metadata: Age of authors
+
+```{r}
+
+# read DTAbaby metadata with author birth year
+dtababy_author_metadata <- read_csv("dtababy_with_author_data.csv")
+dtababy_author_metadata$Year_of_birth <- gsub(".* |.*\\.", "", dtababy_author_metadata$date_of_birth)
+
+select(dtababy_author_metadata, -Length)
+
+
+# add authors to d_salience
+d_salience <-left_join(d_salience, select(dtababy_author_metadata, -Length),
+                         by = c("file_id" = "ID"))
+
+# also add authors to d
+d <- left_join(d, select(dtababy_author_metadata, -Length), by = c("file_id" = "ID"))
+
+
+# add age of author
+d_salience$age <- d_salience$year - as.numeric(d_salience$Year_of_birth)
+d_salience$age <- ifelse(d_salience$age>80, NA, d_salience$age)
+
+d$age <- d$file_year - as.numeric(d$Year_of_birth)
+d$age <- ifelse(d$age>80, NA, d$age)
+
+
+
+# add a generation column
+seq(min(na.omit(d_salience$Year_of_birth)), max(na.omit(d_salience$Year_of_birth)), 30)
+d_salience$Geburtsjahr <- case_when(d_salience$Year_of_birth < 1531 ~ "1500-1530",
+          d_salience$Year_of_birth >= 1531 & d_salience$Year_of_birth < 1561 ~ "1531-1560",
+          d_salience$Year_of_birth >= 1561 & d_salience$Year_of_birth < 1591 ~ "1561-1590",
+          d_salience$Year_of_birth >= 1591 & d_salience$Year_of_birth < 1621 ~ "1591-1620",
+          d_salience$Year_of_birth >= 1621 & d_salience$Year_of_birth < 1651 ~ "1621-1650",
+          d_salience$Year_of_birth >= 1651 & d_salience$Year_of_birth < 1681 ~ "1651-1680",
+          d_salience$Year_of_birth >= 1681 & d_salience$Year_of_birth < 1711 ~ "1681-1710",
+          d_salience$Year_of_birth >= 1711 & d_salience$Year_of_birth < 1741 ~ "1711-1740",
+          d_salience$Year_of_birth >= 1741 & d_salience$Year_of_birth < 1771 ~ "1741-1770",
+          d_salience$Year_of_birth >= 1771 & d_salience$Year_of_birth < 1801 ~ "1771-1800",
+          d_salience$Year_of_birth >= 1801 & d_salience$Year_of_birth < 1831 ~ "1801-1830",
+          d_salience$Year_of_birth >= 1831 & d_salience$Year_of_birth < 1861 ~ "1830-1860",
+          d_salience$Year_of_birth >= 1861 ~ ">1861")
+
+d$Geburtsjahr <- case_when(d$Year_of_birth < 1531 ~ "1500-1530",
+                                    d$Year_of_birth >= 1531 & d$Year_of_birth < 1561 ~ "1531-1560",
+                                    d$Year_of_birth >= 1561 & d$Year_of_birth < 1591 ~ "1561-1590",
+                                    d$Year_of_birth >= 1591 & d$Year_of_birth < 1621 ~ "1591-1620",
+                                    d$Year_of_birth >= 1621 & d$Year_of_birth < 1651 ~ "1621-1650",
+                                    d$Year_of_birth >= 1651 & d$Year_of_birth < 1681 ~ "1651-1680",
+                                    d$Year_of_birth >= 1681 & d$Year_of_birth < 1711 ~ "1681-1710",
+                                    d$Year_of_birth >= 1711 & d$Year_of_birth < 1741 ~ "1711-1740",
+                                    d$Year_of_birth >= 1741 & d$Year_of_birth < 1771 ~ "1741-1770",
+                                    d$Year_of_birth >= 1771 & d$Year_of_birth < 1801 ~ "1771-1800",
+                                    d$Year_of_birth >= 1801 & d$Year_of_birth < 1831 ~ "1801-1830",
+                                    d$Year_of_birth >= 1831 & d$Year_of_birth < 1861 ~ "1830-1860",
+                                    d$Year_of_birth >= 1861 ~ ">1861")
+
+# add generation number
+d_salience$Geburtsjahr <- factor(d_salience$Geburtsjahr, levels = c(levels(factor(d_salience$Geburtsjahr))[2:length(levels(factor(d_salience$Geburtsjahr)))], ">1861"))
+d_salience$Gen_no <- as.numeric(d_salience$Geburtsjahr)
+
+# plot
+
+d_salience %>% filter(!is.na(Geburtsjahr)) %>%
+  group_by(author) %>%
+  mutate(salience = mean(na.omit(mean_salience)),
+         se_salience = se(na.omit(salience)),
+         min = salience - se_salience,
+         max = salience + se_salience) %>%
+  ungroup() %>%
+  mutate(text_type = factor(text_type),
+         author = factor(author),
+         century = factor(century),
+         Geburtsjahr = factor(Geburtsjahr)) %>%
+  arrange(Gen_no, desc(salience)) %>% 
+  mutate(index = row_number()) %>%
+  ggplot(aes(x = text_type, y = salience, col = Geburtsjahr)) +
+  geom_boxplot() + # facet_wrap(~text_type) +
+  xlab("Text type") + ylab("Salience index") +
+  guides(col = guide_legend(ncol = 2)) +
+  #theme_bw() +
+  theme(axis.text = element_text(size = 18)) +
+  theme(axis.title = element_text(size = 18)) +
+  theme(strip.text = element_text(size = 18)) +
+  theme(legend.text = element_text(size = 18)) +
+  theme(legend.title = element_text(size = 18, face = "bold")) +
+  theme(text = element_text(size = 18)) +
+  theme(axis.text.x = element_text(angle=45, hjust=.9, size=12)) +
+  guides(col = guide_legend(title = "Year of birth")) 
+# ggsave("Author_salience_index_Age_EN.png", width = 9, height = 6)
+
+
+```
+
