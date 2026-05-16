@@ -1,19 +1,10 @@
 ---
 title: "German Comparative Correlatives"
-author: "Stefan Hartmann"
 output: html_document
-execute:
-  warning: false
-  error: false
-  message: false
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(
-  comment = '', fig.width = 6, fig.height = 6
-)
-
 ```
 
 ## Comparative correlatives
@@ -23,7 +14,7 @@ This script contains analyses on the comparative correlative construction in the
 
 ### load packages, read data
 
-```{r cars, message=FALSE}
+```{r cars}
 
 
 # install non-CRAN packages (if not yet installed)
@@ -59,6 +50,7 @@ library(lme4)
 library(effects)
 library(ggstats)
 library(scales)
+library(ggrepel)
 
 # read data ---------------------------------------------------------------
 
@@ -320,9 +312,8 @@ d %>% select(file_century, file_genre, Verbstellung) %>% na.omit %>%
   guides(fill = guide_legend(title = "Verb position"))
 
 # ggsave("fig/Verb_position_EN.png", width = 10, height = 6)
-```
 
-```{r, fig.height=10}
+
 # verb position and same vs. different connectors
 for(i in 1:3) {
   assign(paste0("p0",i), 
@@ -423,7 +414,7 @@ fviz_mca_var(mca_results, choice = "var.cat", col.quali.sup = "red",
   theme(legend.text = element_text(size = 18)) +
   theme(legend.title = element_text(size = 18, face = "bold")) +
   theme(text = element_text(size = 18))
-# ggsave("fig/mca02.png", height = 13, width = 13, bg = "white")
+ggsave("fig/mca02.png", height = 13, width = 13, bg = "white")
 
 
 
@@ -494,14 +485,137 @@ get_salience_by_author(1,1) + get_salience_by_author(1,2) + get_salience_by_auth
   get_salience_by_author(3,1) + get_salience_by_author(3,2) + get_salience_by_author(3,3) +
   plot_layout(ncol = 3) &
   theme(    panel.background = element_rect(fill='transparent'), #transparent panel bg
-    plot.background = element_rect(fill='transparent', color=NA))
+    plot.background = element_rect(fill='white', color=NA))
 # ggsave("fig/authors_salience_en_transp.png", width = 15, height = 10, bg = "transparent")
+# ggsave("fig/authors_salience_en.png", width = 15, height = 10, bg = "transparent")
+
+
+# salience overall
+set.seed(2000)
+d_salience %>% mutate(Author = ifelse(mean_salience>=1, gsub(".* ", "", author), "")) %>%
+  ggplot(aes(x = year, y = mean_salience)) + facet_wrap(~text_type) +
+  geom_point(col="grey30", fill = "transparent") + 
+  geom_smooth() + theme_bw() + geom_text_repel(aes(label = Author), vjust = -0.8, cex = 2.5, max.overlaps = 18) +
+  ggtitle("Salience index") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        panel.background = element_rect(fill='transparent'), #transparent panel bg
+        plot.background = element_rect(fill='transparent', color=NA)) +
+  xlab("Year") + ylab("Mean salience") + theme(rect = element_rect(fill = "transparent"))
+ ggsave("fig/salience_en.png", width = 15, height = 6, bg = "white")
 
 ```
 
 ## Additional metadata: Age of authors
 
-```{r, fig.width=30, fig.height=30}
+The birth year of authors was automatically extracted from the German National Library using the following function (based on a script kindly provided by Andreas Blombach):
+
+```{r, eval=FALSE}
+
+library(jsonlite)
+library(tidyverse)
+
+# Function for querying the API:
+get_author_details <- function(author_id) {
+  tryCatch(
+    {json_data <- fromJSON(str_c("https://hub.culturegraph.org/entityfacts/", author_id), flatten = TRUE)
+    
+    if (!is_null(json_data$placeOfBirth$`@id`)) {
+      place_of_birth_coords <- json_data$placeOfBirth$`@id` |>
+        str_extract("(https://d-nb.info/gnd/)(.+)$", group = 2) |>
+        get_coordinates() |>
+        as.double()
+    } else {
+      place_of_birth_coords <- NA
+    }
+    
+    tibble_data <- tibble(
+      author_id = author_id,
+      name = json_data$preferredName,
+      surname = json_data$surname,
+      forename = json_data$forename,
+      gender = json_data$gender$label,
+      date_of_birth = json_data$dateOfBirth,
+      date_of_death = json_data$dateOfDeath,
+      place_of_birth = json_data$placeOfBirth$preferredName,
+      longitude = place_of_birth_coords[1],
+      latitude = place_of_birth_coords[2]
+    )
+    
+    return(tibble_data)},
+    error = function(e) return(tibble(
+      author_id = author_id,
+      name = NA,
+      surname = NA,
+      forename = NA,
+      gender = NA,
+      date_of_birth = NA,
+      date_of_death = NA,
+      place_of_birth = NA,
+      longitude = NA,
+      latitude = NA
+    ))
+  )
+}
+
+
+# Helper function to get location data:
+get_coordinates <- function(place_id) {
+  json_data <- fromJSON(str_c("https://hub.culturegraph.org/entityfacts/", place_id), flatten = TRUE)
+  coords <- json_data$location$geometry$coordinates
+  return(coords)
+}
+
+
+# List of DTAbaby IDs
+dtababy <- read_delim("dtababy_textnames.txt", delim="\t", quote="",
+                      col_names = c("Length", "ID", "Title", "Genre"))
+
+# get author IDs ----------------------------------------------------------
+f <- list.files("dta2021_convert/files/full", full.names = T) # downloadable data from deutschestextarchiv.de
+
+dtababy$author_ID_link <- NA
+
+for(i in 1:nrow(dtababy)) {
+  if(any(grepl(dtababy$ID[i], f))) {
+    cur <- readLines(f[grep(dtababy$ID[i], f)])
+    
+    start <- grep("<cmdp:author>", cur)[1]
+    end <- grep("</cmdp:author>", cur)[1]
+    
+    if(!is.na(start) & !is.na(end)) {
+      cur <- cur[start:end]
+      
+      if(any(grepl("d-nb.info", cur))) {
+        cur <- grep("d-nb.info", cur, value=T)
+        dtababy$author_ID_link[i] <- gsub("<.*", "", gsub(".*(?=http://d-nb)", "", cur, perl = T))
+      }
+      
+      
+    }
+  }
+  
+  
+  
+
+  print(i)
+}
+
+
+# add Author ID column
+dtababy$Author_ID <- gsub(".*/", "", dtababy$author_ID_link)
+
+# get unique author IDs, map author data
+ids <- unique(na.omit(dtababy$Author_ID))
+author_data <- map_dfr(ids, get_author_details)
+
+# combine with df and export
+dtababy <- left_join(dtababy, author_data, by = c("Author_ID" = "author_id"))
+write_csv(dtababy, "dtababy_with_author_data.csv")
+
+```
+
+
+```{r}
 
 # read DTAbaby metadata with author birth year
 dtababy_author_metadata <- read_csv("dtababy_with_author_data.csv")
@@ -576,11 +690,13 @@ d_salience %>% filter(!is.na(Geburtsjahr)) %>%
          Geburtsjahr = factor(Geburtsjahr)) %>%
   arrange(Gen_no, desc(salience)) %>% 
   mutate(index = row_number()) %>%
-  ggplot(aes(x = text_type, y = salience, col = Geburtsjahr)) +
+  ggplot(aes(x = text_type, y = salience, col = century, fill = Geburtsjahr)) +
   geom_boxplot() + # facet_wrap(~text_type) +
   xlab("Text type") + ylab("Salience index") +
   guides(col = guide_legend(ncol = 2)) +
-  #theme_bw() +
+  theme_bw() +
+  scale_color_manual(name = "Century", values = rep("black", 3)) +
+  scale_fill_manual(name = "Year of birth", values = c(RColorBrewer::brewer.pal(4, "Purples"), RColorBrewer::brewer.pal(3, "Blues"), RColorBrewer::brewer.pal(5, "Oranges")[2:4], RColorBrewer::brewer.pal(5, "Greens")[1:3])) +
   theme(axis.text = element_text(size = 18)) +
   theme(axis.title = element_text(size = 18)) +
   theme(strip.text = element_text(size = 18)) +
@@ -588,14 +704,10 @@ d_salience %>% filter(!is.na(Geburtsjahr)) %>%
   theme(legend.title = element_text(size = 18, face = "bold")) +
   theme(text = element_text(size = 18)) +
   theme(axis.text.x = element_text(angle=45, hjust=.9, size=12)) +
-  guides(col = guide_legend(title = "Year of birth")) 
+  #guides(fill = guide_legend(title = "Year of birth")) +
+  guides(color = "none")
 # ggsave("fig/Author_salience_index_Age_EN.png", width = 9, height = 6)
 
 
 ```
 
-## System info
-
-```{r}
-Sys.info()
-```
