@@ -2,10 +2,18 @@
 title: "German Comparative Correlatives"
 author: "Stefan Hartmann"
 output: html_document
+execute:
+  warning: false
+  error: false
+  message: false
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  comment = '', fig.width = 6, fig.height = 6
+)
+
 ```
 
 ## Comparative correlatives
@@ -15,7 +23,7 @@ This script contains analyses on the comparative correlative construction in the
 
 ### load packages, read data
 
-```{r cars}
+```{r cars, message=FALSE}
 
 
 # install non-CRAN packages (if not yet installed)
@@ -27,25 +35,7 @@ if(!is.element("wizard", installed.packages())) {
 
 # install package collostructions, if needed
 if(!is.element("collostructions", installed.packages())) {
-  
-  if(.Platform$OS.type=="windows") {
-    if(R.version$major < 4) {
-      install.packages("https://sfla.ch/wp-content/uploads/2018/03/collostructions_0.1.0.zip", repos = NULL)
-    } else {
-      install.packages("https://sfla.ch/wp-content/uploads/2021/02/collostructions_0.2.0.zip", repos = NULL)
-    }
-    
-    
-  } else {
-    if(R.version$major < 4) {
-      install.packages("https://sfla.ch/wp-content/uploads/2018/03/collostructions_0.1.0.zip", repos = NULL)
-    } else {
-      install.packages("https://sfla.ch/wp-content/uploads/2021/02/collostructions_0.2.0.zip", repos = NULL)
-    }
-    
-  }
-  
-  
+  devtools::install_github("skeptikantin/collostructions")
 }
 
 
@@ -106,9 +96,9 @@ dtababy <- dtababy %>% mutate(text_type = case_when(dtababy$text_type == "Wissen
 ggplot(dtababy, aes(x = year, y = text_type, size = freq, col = author)) +
   geom_quasirandom() + 
   guides(col = "none", size = "none") +
-  # geom_boxplot(aes(group = text_type), notch = T, alpha = .5) +
+  geom_boxplot(aes(group = text_type), notch = T, alpha = .5, col = "grey") +
   scale_color_viridis_d() +
-  theme_bw() + ylab("Textsorte") + xlab("Jahr") +
+  theme_bw() + ylab("Text type") + xlab("Year") +
   theme(axis.text = element_text(size = 18)) +
   theme(axis.title = element_text(size = 18)) +
   theme(strip.text = element_text(size = 18)) +
@@ -118,8 +108,8 @@ ggplot(dtababy, aes(x = year, y = text_type, size = freq, col = author)) +
   ggtitle("Text distribution in DTAbaby") +
   theme(plot.title = element_text(face = "bold", hjust = 0.5))
 
-# ggsave("dtababy_distribution_EN.png", width = 9, height = 6.5)
-# ggsave("dtababy_distribution_with_boxplot_EN.png", width = 9, height = 6.5)
+# ggsave("fig/dtababy_distribution_EN.png", width = 9, height = 6.5)
+# ggsave("fig/dtababy_distribution_with_boxplot_EN.png", width = 9, height = 6.5)
 
 
 ```
@@ -156,7 +146,7 @@ dtababy %>% mutate(
   theme_bw() +
   scale_color_manual(values = c("grey", "black")) +
   guides(color = "none")
-# ggsave("kks_rel_freq_annotated01_EN.png", width = 12, height = 5.5)  
+# ggsave("fig/kks_rel_freq_annotated01_EN.png", width = 12, height = 5.5)  
 
 
 ```
@@ -174,12 +164,12 @@ d$file_genre <- case_when(d$file_genre == "Belletristik" ~ "Fiction",
 
 # distribution of data across time and text types -------------------------
 
-d %>% select(file_century, file_genre) %>% table
+d %>% select(file_century, file_genre) %>% table %>% as_tibble() %>% pivot_wider(names_from = "file_genre", values_from = "n") %>% DT::datatable()
 
 
 ```
 
-### Quantitative Auswertungen
+### Quantitative analyses
 
 ```{r}
 
@@ -200,25 +190,25 @@ qbarplot(d, file_century, structure, file_genre, wrap100=T) +
   xlab("Century") + ylab("Relative Frequency") +
   guides(fill = guide_legend(title = "Structure"))
 
-# ggsave("structure_EN.png", width = 10, height = 6)
+# ggsave("fig/structure_EN.png", width = 10, height = 6)
 
 
 
 # clause order and sentence type ------------------------------------------
 
 cosenty <- function(i) {
-  p <- d %>% mutate(Reihenfolge = ifelse(grepl("^A", d$structure), "Apodosis > Protasis", "Protasis > Apodosis")) %>%
+  p <- d %>% mutate(Order = ifelse(grepl("^A", d$structure), "Apodosis > Protasis", "Protasis > Apodosis")) %>%
     mutate(KK_Nebensatz = ifelse(KK_im_Nebensatz=="y", "CC in subord. clause", "CC in main clause")) %>%
     mutate(KK_Nebensatz = factor(KK_Nebensatz, levels=c("CC in main clause", "CC in subord. clause"))) %>%
     filter(file_genre == levels(factor(d$file_genre))[i]) %>%
-    qbarplot(file_century, Reihenfolge, KK_Nebensatz, wrap100=T) + xlab("Century") + ylab("Relative Frequency") +
+    qbarplot(file_century, Order, KK_Nebensatz, wrap100=T) + xlab("Century") + ylab("Relative Frequency") +
     ggtitle(levels(factor(d$file_genre))[i]) +
     theme(plot.title = element_text(face = "bold", hjust = 0.5))
   return(p)
 }
 
 cosenty(1) / cosenty(2) / cosenty(3) + plot_layout(guides = "collect")
-# ggsave("Order_main_subordinate_EN_portrait.png", width = 10, height= 15  )
+# ggsave("fig/Order_main_subordinate_EN_portrait.png", width = 10, height= 15  )
 
 
 
@@ -264,7 +254,7 @@ qbarplot(d, file_century, Konnektor, file_genre, wrap100 = T) +
   ylab("Relative Frequency") + xlab("Century") +
   guides(fill = guide_legend(title = "Connector"))
 
-# ggsave("connectors_EN.png", width = 10, height = 5.5)
+# ggsave("fig/connectors_EN.png", width = 10, height = 5.5)
 
 
 
@@ -287,7 +277,7 @@ for(i in c(1:3)) {
 
 
 p1 / p2 / p3 + plot_layout(guides = "collect")
-# ggsave("structure_by_connectors_EN_portrait.png", width = 7, height = 13)
+# ggsave("fig/structure_by_connectors_EN_portrait.png", width = 7, height = 13)
 
 
 
@@ -329,9 +319,10 @@ d %>% select(file_century, file_genre, Verbstellung) %>% na.omit %>%
   xlab("Century") + ylab("Relative Frequency") +
   guides(fill = guide_legend(title = "Verb position"))
 
-# ggsave("Verb_position_EN.png", width = 10, height = 6)
+# ggsave("fig/Verb_position_EN.png", width = 10, height = 6)
+```
 
-
+```{r, fig.height=10}
 # verb position and same vs. different connectors
 for(i in 1:3) {
   assign(paste0("p0",i), 
@@ -350,7 +341,7 @@ for(i in 1:3) {
 
 
 p01 / p02 / p03 + plot_layout(guides = "collect")
- ggsave("verbstellung_same_different_connectors_EN_portrait.png", width = 7, height = 13)
+# ggsave("fig/verbstellung_same_different_connectors_EN_portrait.png", width = 7, height = 13)
 
 ```
 
@@ -394,8 +385,9 @@ d$Gemeinsamer_Bezug <- ifelse(d$gemeinsamer_Bezug=="nein", "kein gem. Bezug", "g
 d$Gemeinsamer_Bezug <- factor(d$Gemeinsamer_Bezug, levels = c("kein gem. Bezug", "gem. Bezug"))
 
 # EN
-d$Joint_Referent <- ifelse(d$gemeinsamer_Bezug=="nein", "Joint referent", "No joint referent")
-d$Joint_Referent <- factor(d$Joint_Referent, levels = c("Joint referent", "No joint referent"))
+d$Elliptical_Antecedent_in_Consequent <- ifelse(d$gemeinsamer_Bezug=="nein", "elliptical A in C", "no elliptical A in C")
+d$Elliptical_Antecedent_in_Consequent <- factor(d$Elliptical_Antecedent_in_Consequent, levels = c("elliptical A in C", "No elliptical A in C"))
+
 
 # Sentence Type
 d$Satztyp <- ifelse(d$KK_im_Nebensatz=="y" | is.na(d$KK_im_Nebensatz), "KK im Hauptsatz", "KK im Nebensatz")
@@ -410,22 +402,28 @@ d$Connector <- d$Konnektor
 d$Verb_position <- d$Verbstellung
 
 mca_input <- select(d, file_genre, Century, Connector, Clause_Order, 
-                    Joint_Referent, Sentence_Type, Verb_position,
+                    Elliptical_Antecedent_in_Consequent, Sentence_Type, Verb_position,
                     Phrase_Types, Number_of_Clauses)
 mca_results <- MCA(na.omit(mca_input), quali.sup = c(1,2), graph = FALSE)
 res <- explor::prepare_results(mca_results)
-explor::MCA_var_plot(res, xax = 1, yax = 2, var_sup = TRUE, var_sup_choice = c("file_genre",
-                                                                               "Century"), var_lab_min_contrib = 0, col_var = "Variable", symbol_var = "Type",
-                     size_var = NULL, size_range = c(10, 300), labels_size = 10, point_size = 56,
-                     transitions = TRUE, labels_positions = NULL, labels_prepend_var = FALSE,
-                     xlim = c(-4.61, 5.2), ylim = c(-5.28, 4.53))
+# explor::MCA_var_plot(res, xax = 1, yax = 2, var_sup = TRUE, var_sup_choice = c("file_genre",
+#                                                                              "Century"), var_lab_min_contrib = 0, col_var = "Variable", symbol_var = "Type",
+#                   size_var = NULL, size_range = c(10, 300), labels_size = 10, point_size = 56,
+#                  transitions = TRUE, labels_positions = NULL, labels_prepend_var = FALSE,
+#                 xlim = c(-4.61, 5.2), ylim = c(-5.28, 4.53))
 
 
-#explor(mca_results)
+# explor(mca_results)
 # dimdesc(mca_results)
-#fviz_mca_var(mca_results, choice = "var.cat", col.quali.sup = "red",
- #            col.var = "black")
-# ggsave("mca02.png", height = 20, width = 20, bg = "white")
+fviz_mca_var(mca_results, choice = "var.cat", col.quali.sup = "red",
+            col.var = "black") +
+  theme(axis.text = element_text(size = 18)) +
+  theme(axis.title = element_text(size = 18)) +
+  theme(strip.text = element_text(size = 18)) +
+  theme(legend.text = element_text(size = 18)) +
+  theme(legend.title = element_text(size = 18, face = "bold")) +
+  theme(text = element_text(size = 18))
+# ggsave("fig/mca02.png", height = 13, width = 13, bg = "white")
 
 
 
@@ -497,13 +495,13 @@ get_salience_by_author(1,1) + get_salience_by_author(1,2) + get_salience_by_auth
   plot_layout(ncol = 3) &
   theme(    panel.background = element_rect(fill='transparent'), #transparent panel bg
     plot.background = element_rect(fill='transparent', color=NA))
-# ggsave("authors_salience_en_transp.png", width = 15, height = 10, bg = "transparent")
+# ggsave("fig/authors_salience_en_transp.png", width = 15, height = 10, bg = "transparent")
 
 ```
 
 ## Additional metadata: Age of authors
 
-```{r}
+```{r, fig.width=30, fig.height=30}
 
 # read DTAbaby metadata with author birth year
 dtababy_author_metadata <- read_csv("dtababy_with_author_data.csv")
@@ -591,8 +589,13 @@ d_salience %>% filter(!is.na(Geburtsjahr)) %>%
   theme(text = element_text(size = 18)) +
   theme(axis.text.x = element_text(angle=45, hjust=.9, size=12)) +
   guides(col = guide_legend(title = "Year of birth")) 
-# ggsave("Author_salience_index_Age_EN.png", width = 9, height = 6)
+# ggsave("fig/Author_salience_index_Age_EN.png", width = 9, height = 6)
 
 
 ```
 
+## System info
+
+```{r}
+Sys.info()
+```
